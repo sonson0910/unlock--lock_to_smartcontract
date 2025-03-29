@@ -1,3 +1,9 @@
+"""
+This module provides functionality for creating and managing blockchain context objects
+for interacting with the Cardano blockchain. It currently supports the Blockfrost API
+service for accessing the Cardano network.
+"""
+
 # sdk/service/context.py
 
 from pycardano import BlockFrostChainContext, Network

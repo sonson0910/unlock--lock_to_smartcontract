@@ -1,3 +1,8 @@
+"""
+This module provides functionality for locking funds into a Cardano smart contract.
+It includes functions for reading the validator script and building transactions to lock funds with associated datum.
+"""
+
 from dataclasses import dataclass
 from pycardano import (
     Address,
@@ -21,13 +26,24 @@ import os
 
 from context import get_chain_context
 
+# Initialize blockchain context
 context = get_chain_context() 
 
+# Load issuer's signing key and derive verification key and address
 issuer_skey = PaymentSigningKey.load("me.sk")
 issuer_vkey = PaymentVerificationKey.from_signing_key(issuer_skey)
 issuer_address = Address(issuer_vkey.hash(), network=Network.TESTNET)
 
 def read_validator() -> dict:
+    """
+    Read and parse the Plutus validator script from plutus.json file.
+    
+    Returns:
+        dict: A dictionary containing the validator script information including:
+            - type: The script type (PlutusV3)
+            - script_bytes: The compiled script bytes
+            - script_hash: The script hash
+    """
     with open("plutus.json", "r") as f:
         validator = json.load(f)
     script_bytes = PlutusV3Script(
@@ -47,6 +63,19 @@ def lock(
     signing_key: PaymentSigningKey,
     context: BlockFrostChainContext,
 ) -> TransactionId:
+    """
+    Lock funds into a smart contract by building and submitting a transaction.
+    
+    Args:
+        amount: Amount of lovelace to lock
+        into: Script hash of the contract
+        datum: Plutus datum to attach to the output
+        signing_key: Key to sign the transaction
+        context: Blockchain context for transaction building
+        
+    Returns:
+        TransactionId: The hash of the submitted transaction
+    """
     # read addresses
     with open("me.addr", "r") as f:
         input_address = Address.from_primitive(f.read())
@@ -75,17 +104,21 @@ def lock(
 
 @dataclass
 class HelloWorldDatum(PlutusData):
+    """Simple datum data structure containing owner information."""
     CONSTR_ID = 0
     owner: bytes
  
+# Initialize signing key and validator
 signing_key = PaymentSigningKey.load("me.sk")
- 
 validator = read_validator()
  
+# Calculate owner's verification key hash
 owner = PaymentVerificationKey.from_signing_key(signing_key).hash()
  
+# Create datum with owner information
 datum = HelloWorldDatum(owner=owner.to_primitive())
 
+# Execute transaction to lock funds
 tx_hash = lock(
     amount=2_000_000,
     into=validator["script_hash"],

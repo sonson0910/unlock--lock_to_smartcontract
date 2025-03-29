@@ -1,6 +1,6 @@
 """
-This module provides functionality for interacting with a Cardano smart contract.
-It includes functions for unlocking funds from the contract and managing UTxOs.
+This module provides functionality for interacting with a Cardano smart contract that implements a mining system.
+It includes functions for unlocking funds from the contract and managing miner data.
 """
 
 from dataclasses import dataclass
@@ -8,8 +8,8 @@ from pycardano import (
     Address,
     BlockFrostChainContext,
     Network,
-    PaymentSigningKey,
-    PaymentVerificationKey,
+    ExtendedSigningKey,
+    PaymentExtendedVerificationKey,
     PlutusData,
     PlutusV3Script,
     ScriptHash,
@@ -32,8 +32,8 @@ from context import get_chain_context
 context = get_chain_context() 
 
 # Load issuer's signing key and derive verification key and address
-issuer_skey = PaymentSigningKey.load("me.sk")
-issuer_vkey = PaymentVerificationKey.from_signing_key(issuer_skey)
+issuer_skey = ExtendedSigningKey.load("mex.sk")
+issuer_vkey = PaymentExtendedVerificationKey.from_signing_key(issuer_skey)
 issuer_address = Address(issuer_vkey.hash(), network=Network.TESTNET)
 
 def read_validator() -> dict:
@@ -59,13 +59,13 @@ def read_validator() -> dict:
     }
 
 def unlock_lock(
-    utxo: UTxO,
+    utxos: list[UTxO],
     amount: int,
     into: ScriptHash,
     datum: PlutusData,
     from_script: PlutusV3Script,
     redeemer: Redeemer,
-    signing_key: PaymentSigningKey,
+    signing_key: ExtendedSigningKey,
     owner: VerificationKeyHash,
     context: BlockFrostChainContext,
 ) -> TransactionId:
@@ -73,7 +73,7 @@ def unlock_lock(
     Unlock funds from a smart contract by building and submitting a transaction.
     
     Args:
-        utxo: UTxO to spend from
+        utxos: List of UTxOs to spend from
         amount: Amount of lovelace to lock
         into: Script hash of the contract
         datum: Plutus datum to attach to the output
@@ -87,17 +87,17 @@ def unlock_lock(
         TransactionId: The hash of the submitted transaction
     """
     # read addresses
-    with open("me.addr", "r") as f:
+    with open("mex.addr", "r") as f:
         input_address = Address.from_primitive(f.read())
     contract_address = Address(
         payment_part = into,
         network=Network.TESTNET,
     )
- 
+    print(utxos)
     # build transaction
     builder = TransactionBuilder(context=context)
     builder.add_script_input(
-        utxo=utxo,
+        utxo=utxos[0],
         script=from_script,
         redeemer=redeemer,
     )
@@ -105,7 +105,7 @@ def unlock_lock(
     builder.add_output(
         TransactionOutput(
             address=input_address,
-            amount=utxo.output.amount.coin,
+            amount=utxos[0].output.amount.coin,
         )
     )
     builder.required_signers = [owner]
@@ -155,33 +155,76 @@ class HelloWorldDatum(PlutusData):
     """Simple datum data structure containing owner information."""
     CONSTR_ID = 0
     owner: bytes
+
+@dataclass
+class MinerDatum(PlutusData):
+    """
+    Data structure representing a miner's information in the contract.
+    
+    Attributes:
+        uid: Unique identifier for the miner
+        stake: Amount of ADA staked by the miner
+        performance: Miner's performance score
+        trust_score: Trustworthiness score of the miner
+        accumulated_rewards: Total rewards earned by the miner
+        last_evaluated: Timestamp of last performance evaluation
+        history_hash: Hash of miner's historical data
+        wallet_addr_hash: Hash of miner's wallet address
+        status: Current status of the miner
+        block_reg_at: Block number when the miner registered
+    """
+    CONSTR_ID = 0
+    uid: bytes              # Unique identifier of the miner
+    stake: int              # Amount of ADA staked
+    performance: int        # Performance score
+    trust_score: int        # Trust score
+    accumulated_rewards: int # Accumulated rewards
+    last_evaluated: int     # Last evaluation timestamp
+    history_hash: bytes     # History hash
+    wallet_addr_hash: bytes # Wallet address hash
+    status: bytes           # Current status
+    block_reg_at: int       # Registration block number
  
 # Initialize signing key and validator
-signing_key = PaymentSigningKey.load("me.sk")
+signing_key = ExtendedSigningKey.load("mex.sk")
 validator = read_validator()
-owner = PaymentVerificationKey.from_signing_key(signing_key).hash()
+owner = PaymentExtendedVerificationKey.from_signing_key(signing_key).hash()
  
-# Create datum with owner information
-datum = HelloWorldDatum(owner=owner.to_primitive())
+# Create a sample miner datum
+datum = MinerDatum(
+    uid=b"miner123",
+    stake=1000000,
+    performance=95,
+    trust_score=80,
+    accumulated_rewards=500000,
+    last_evaluated=123456,
+    history_hash=b"abcdef",
+    wallet_addr_hash=owner.to_primitive(),
+    status=b"active",
+    block_reg_at=654321,
+)
+
+print("CBOR of MinerDatum:", datum.to_cbor_hex())
 
 redeemer = Redeemer(data=HelloWorldRedeemer())
 
-# Find UTxO for the owner
-utxo = get_utxo_from_str(owner, Address(
-    payment_part = validator["script_hash"],
+# Get all UTxOs from the contract address
+contract_address = Address(
+    payment_part=validator["script_hash"],
     network=Network.TESTNET,
-))
+)
+utxos = context.utxos(str(contract_address))
 
 # Execute the unlock transaction
 tx_hash = unlock_lock(
-    utxo=utxo,
-    amount=2_000_000,
+    utxos=utxos,
+    amount=4_000_000,
     into=validator["script_hash"],
     datum=datum,
     redeemer=redeemer,
     from_script=validator["script_bytes"],
     signing_key=signing_key,
-    owner=PaymentVerificationKey.from_signing_key(signing_key).hash(),
+    owner=PaymentExtendedVerificationKey.from_signing_key(signing_key).hash(),
     context=context,
 )
  
